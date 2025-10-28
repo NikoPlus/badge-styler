@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Markdown Badge Editor</title>
+    <!-- 1. Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 2. Marked.js (Markdown Parser) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- 3. GitHub Markdown CSS (for preview styling) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css">
+    <!-- 4. Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Custom Tailwind Config & Styles -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#6d28d9',
+                        'dark-bg': '#1e1e1e',
+                        'card-bg': '#252526',
+                        'sidebar-bg': '#333333',
+                        'activity-bar-bg': '#3c3c3c',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['Roboto Mono', 'monospace'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Use Inter font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Roboto+Mono:wght@400&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1e1e1e;
+            color: #e5e7eb; /* Light text color for dark background */
+        }
+
+        /* Style the editor textarea */
+        #editor {
+            font-family: 'Roboto Mono', monospace;
+            background-color: #252526;
+            color: #e5e7eb; /* Light text color */
+            border: 1px solid #3c3c3c;
+            border-radius: 0.5rem;
+            resize: none;
+            transition: border-color 0.2s;
+        }
+        #editor:focus {
+            outline: none;
+            border-color: #6d28d9;
+            box-shadow: 0 0 0 2px #6d28d960;
+        }
+
+        /* Style the preview pane */
+        #preview {
+            background-color: #ffffff;
+            border-radius: 0.5rem;
+            height: 100%;
+            overflow-y: auto;
+            border: 1px solid #3c3c3c;
+        }
+
+        .markdown-body {
+            box-sizing: border-box;
+            min-width: 200px;
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 2.5rem;
+            color: #24292e; /* GitHub's default text color */
+        }
+        
+        /* Draggable badge styling */
+        .badge-item {
+            cursor: grab;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background-color: #252526;
+        }
+        .badge-item:hover {
+            background-color: #3c3c3c;
+            border-color: #6d28d9;
+        }
+        .badge-item:active {
+            cursor: grabbing;
+            opacity: 0.8;
+            transform: scale(0.95);
+        }
+
+        /* VS Code style layout */
+        .main-layout {
+            height: calc(100vh - 41px);
+        }
+
+        /* Activity bar icon styling */
+        .activity-btn {
+            color: #d4d4d4;
+            transition: all 0.2s;
+            border-left: 2px solid transparent;
+        }
+        .activity-btn:hover {
+            color: white;
+        }
+        .activity-btn.active {
+            color: white;
+            border-left-color: white;
+        }
+
+        /* Scrollbar styling */
+        #badge-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        #badge-list::-webkit-scrollbar-track {
+            background: #252526;
+            border-radius: 4px;
+        }
+        #badge-list::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 4px;
+        }
+        #badge-list::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+
+        /* Loading animation */
+        .loading-spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Ensure text is visible in dark mode */
+        .text-visible {
+            color: #e5e7eb !important;
+        }
+
+        .category-header {
+            background: #3c3c3c;
+            color: #e5e7eb;
+            font-weight: 600;
+            padding: 8px 12px;
+            margin: 8px 0 4px 0;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+
+    </style>
+</head>
+<body class="text-visible">
+
+    <!-- Top Menu Bar -->
+    <header class="text-left p-2 shadow-lg bg-card-bg border-b border-gray-700 h-[41px]">
+        <h1 class="text-lg font-bold text-white tracking-tight flex items-center">
+            <i data-lucide="file-pen-line" class="w-5 h-5 mr-3 text-primary ml-2"></i>
+            Live Markdown Badge Editor
+        </h1>
+    </header>
+
+    <!-- Main VS Code style layout (Activity Bar | Sidebar | Editor/Preview) -->
+    <div class="main-layout flex flex-row">
+        
+        <!-- 1. Activity Bar (Far Left) -->
+        <div class="bg-activity-bar-bg p-2 pt-4 space-y-4">
+            <button id="toggle-sidebar-btn" class="activity-btn p-2 rounded active" title="Toggle Badges">
+                <i data-lucide="award" class="w-6 h-6"></i>
+            </button>
+        </div>
+
+        <!-- 2. Badge Explorer (Secondary Sidebar) -->
+        <div id="badge-sidebar" class="w-80 p-4 bg-sidebar-bg shadow-xl flex flex-col transition-all duration-300">
+            <h2 class="text-xl font-bold mb-4 text-white flex items-center">
+                Badge Library
+                <span id="badge-count" class="ml-2 bg-primary text-white text-xs px-2 py-1 rounded-full">0</span>
+            </h2>
+
+            <!-- Search Bar -->
+            <div class="mb-4">
+                <label for="badge-search" class="sr-only">Search Badges</label>
+                <div class="relative">
+                    <input type="text" id="badge-search" placeholder="Search badges..." class="w-full p-2 pl-8 bg-card-bg text-white border border-gray-600 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-2.5 top-2.5 text-gray-400"></i>
+                </div>
+            </div>
+
+            <!-- Category Dropdown -->
+            <div class="mb-4">
+                <label for="badge-category" class="block text-sm font-medium text-gray-300 mb-2">Filter by Category</label>
+                <select id="badge-category" class="w-full p-2 bg-card-bg text-white border border-gray-600 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                    <option value="all">All Categories</option>
+                    <!-- Options populated by JS -->
+                </select>
+            </div>
+
+            <!-- Badge List -->
+            <div id="badge-list" class="space-y-2 overflow-y-auto flex-1 pr-1">
+                <div class="flex items-center justify-center py-8">
+                    <div class="text-center">
+                        <i data-lucide="package" class="w-12 h-12 text-gray-500 mx-auto mb-2"></i>
+                        <p class="text-gray-400">Loading badges...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Main Content (Editor & Preview) -->
+        <div class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 h-full">
+            
+            <!-- Editor (Middle) -->
+            <div class="h-full flex flex-col">
+                 <h2 class="text-xl font-bold mb-4 text-white flex items-center">
+                    <i data-lucide="code" class="w-5 h-5 mr-2 text-primary"></i>
+                    Markdown Editor
+                </h2>
+                <textarea id="editor" class="w-full h-full p-4 text-sm" placeholder="# Welcome to Markdown Badge Editor
+
+## Add badges to your README
+Simply drag and drop badges from the left sidebar into this editor.
+
+## Features
+- Live preview
+- Real badge images
+- Easy drag & drop
+- Category organization
+
+Start by selecting a category and dragging badges here!"></textarea>
+            </div>
+            
+            <!-- Preview (Right) -->
+            <div class="h-full flex flex-col">
+                <h2 class="text-xl font-bold mb-4 text-white flex items-center">
+                    <i data-lucide="eye" class="w-5 h-5 mr-2 text-primary"></i>
+                    Live Preview
+                </h2>
+                <div id="preview" class="h-full">
+                    <article class="markdown-body">
+                        <h1>Welcome to Markdown Badge Editor</h1>
+                        <h2>Add badges to your README</h2>
+                        <p>Simply drag and drop badges from the left sidebar into this editor.</p>
+                        <h2>Features</h2>
+                        <ul>
+                            <li>Live preview</li>
+                            <li>Real badge images</li>
+                            <li>Easy drag & drop</li>
+                            <li>Category organization</li>
+                        </ul>
+                        <p>Start by selecting a category and dragging badges here!</p>
+                    </article>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // App state
+        let allBadges = [];
+        let categories = [];
+        let currentCategory = 'all';
+
+        // DOM Elements
+        const categorySelect = document.getElementById('badge-category');
+        const badgeSearch = document.getElementById('badge-search');
+        const badgeList = document.getElementById('badge-list');
+        const badgeCount = document.getElementById('badge-count');
+        const editor = document.getElementById('editor');
+        const preview = document.getElementById('preview');
+        const toggleBtn = document.getElementById('toggle-sidebar-btn');
+        const sidebar = document.getElementById('badge-sidebar');
+
+        // Load badge data from JSON files
+        async function loadBadgeData() {
+            try {
+                badgeList.innerHTML = `
+                    <div class="flex items-center justify-center py-8">
+                        <div class="text-center">
+                            <i data-lucide="loader" class="w-12 h-12 text-primary loading-spinner mx-auto mb-2"></i>
+                            <p class="text-gray-400">Loading badges from JSON files...</p>
+                        </div>
+                    </div>
+                `;
+                lucide.createIcons();
+
+                const categoryFiles = [
+                    'artificial_intelligence_and_bots.json', 'blog.json', 'blockchain.json',
+                    'browsers.json', 'cd.json', 'ci.json', 'cloud_storage.json', 'cryptocurrency.json',
+                    'databases.json', 'design.json', 'developerforums.json', 'documentation_platforms.json',
+                    'education.json', 'funding.json', 'frameworks_platforms_and_libraries.json',
+                    'gaming.json', 'game_consoles.json', 'hostingsaas.json', 'ideseditors.json',
+                    'languages.json', 'mldl.json', 'music.json', 'office.json', 'operating_system.json',
+                    'orm.json', 'other.json', 'quantum_programming_frameworks_and_libraries.json',
+                    'search_engines.json', 'servers.json', 'smartphone_brands.json', 'social.json',
+                    'store.json', 'streaming.json', 'testing.json', 'version_control.json',
+                    'wearables.json', 'workjobs.json'
+                ];
+
+                allBadges = [];
+                categories = [];
+
+                let loadedFiles = 0;
+
+                for (const file of categoryFiles) {
+                    try {
+                        const response = await fetch(`./badge_categories/${file}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            const categoryKey = file.replace('.json', '');
+                            
+                            // Extract category name - FIXED: using correct field names
+                            const categoryName = data.category || data.category_name || formatCategoryName(categoryKey);
+                            
+                            const badgeCount = data.badges ? data.badges.length : 0;
+                            
+                            categories.push({
+                                key: categoryKey,
+                                name: categoryName,
+                                count: badgeCount
+                            });
+
+                            // Add category info to each badge
+                            if (data.badges && Array.isArray(data.badges)) {
+                                data.badges.forEach(badge => {
+                                    // Skip badges without required properties
+                                    if (!badge.badge || !badge.markdown) {
+                                        return;
+                                    }
+                                    
+                                    // Clean markdown - remove backticks if present
+                                    let cleanMarkdown = badge.markdown;
+                                    if (cleanMarkdown.startsWith('`') && cleanMarkdown.endsWith('`')) {
+                                        cleanMarkdown = cleanMarkdown.substring(1, cleanMarkdown.length - 1);
+                                    }
+                                    
+                                    const formattedBadge = {
+                                        id: badge.name?.toLowerCase().replace(/\s+/g, '-') || Math.random().toString(36),
+                                        name: badge.name || badge.technology || badge.alt_text || 'Unknown',
+                                        category: categoryKey,
+                                        categoryName: categoryName,
+                                        markdown: cleanMarkdown,
+                                        imageUrl: badge.badge || badge.badge_url,
+                                        technology: badge.name || badge.technology,
+                                        alt_text: badge.name || badge.alt_text
+                                    };
+                                    allBadges.push(formattedBadge);
+                                });
+                            }
+                            loadedFiles++;
+                        }
+                    } catch (error) {
+                        console.warn(`Could not load ${file}:`, error);
+                    }
+                }
+
+                if (loadedFiles === 0) {
+                    throw new Error('No JSON files could be loaded');
+                }
+
+                console.log(`Loaded ${allBadges.length} badges from ${categories.length} categories`);
+                updateBadgeDisplay();
+                
+            } catch (error) {
+                console.error('Error loading badge data:', error);
+                badgeList.innerHTML = `
+                    <div class="flex items-center justify-center py-8">
+                        <div class="text-center">
+                            <i data-lucide="alert-circle" class="w-12 h-12 text-red-500 mx-auto mb-2"></i>
+                            <p class="text-red-400 mb-2">Failed to load badges</p>
+                            <p class="text-gray-400 text-sm">Check console for details</p>
+                        </div>
+                    </div>
+                `;
+                lucide.createIcons();
+            }
+        }
+
+        // Format category name from key
+        function formatCategoryName(key) {
+            return key.split('_')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
+        }
+
+        // Update preview
+        function updatePreview() {
+            const markdownText = editor.value;
+            const htmlContent = marked.parse(markdownText);
+            preview.innerHTML = `<article class="markdown-body">${htmlContent}</article>`;
+        }
+
+        // Display badges in the sidebar with category grouping
+        function displayBadges(badges) {
+            badgeList.innerHTML = '';
+
+            if (badges.length === 0) {
+                badgeList.innerHTML = `
+                    <div class="flex items-center justify-center py-8">
+                        <div class="text-center">
+                            <i data-lucide="search-x" class="w-12 h-12 text-gray-500 mx-auto mb-2"></i>
+                            <p class="text-gray-400">No badges found</p>
+                        </div>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            
+            // Group badges by category
+            const badgesByCategory = {};
+            badges.forEach(badge => {
+                if (!badgesByCategory[badge.categoryName]) {
+                    badgesByCategory[badge.categoryName] = [];
+                }
+                badgesByCategory[badge.categoryName].push(badge);
+            });
+
+            // Display badges grouped by category
+            Object.keys(badgesByCategory).forEach(categoryName => {
+                // Add category header
+                const categoryHeader = document.createElement('div');
+                categoryHeader.className = 'category-header flex items-center justify-between';
+                categoryHeader.innerHTML = `
+                    <span>${categoryName}</span>
+                    <span class="text-xs bg-gray-600 px-2 py-1 rounded">${badgesByCategory[categoryName].length}</span>
+                `;
+                fragment.appendChild(categoryHeader);
+
+                // Add badges for this category
+                badgesByCategory[categoryName].forEach(badge => {
+                    const badgeEl = document.createElement('div');
+                    badgeEl.className = 'badge-item p-3 rounded-lg shadow flex items-center space-x-3 hover:bg-gray-700 transition-colors';
+                    badgeEl.draggable = true;
+                    badgeEl.title = `Drag to insert ${badge.name} badge`;
+
+                    // Create badge image
+                    const badgeImg = document.createElement('img');
+                    badgeImg.src = badge.imageUrl;
+                    badgeImg.alt = badge.name;
+                    badgeImg.className = "h-6 rounded";
+                    badgeImg.onerror = function() {
+                        this.style.display = 'none';
+                    };
+                    
+                    // Badge name
+                    const badgeName = document.createElement('div');
+                    badgeName.textContent = badge.name;
+                    badgeName.className = "text-sm font-medium text-white truncate flex-1";
+
+                    badgeEl.appendChild(badgeImg);
+                    badgeEl.appendChild(badgeName);
+
+                    // Add drag functionality
+                    badgeEl.addEventListener('dragstart', (e) => {
+                        e.dataTransfer.setData('text/plain', badge.markdown);
+                        e.dataTransfer.effectAllowed = 'copy';
+                        badgeEl.classList.add('opacity-50');
+                    });
+
+                    badgeEl.addEventListener('dragend', () => {
+                        badgeEl.classList.remove('opacity-50');
+                    });
+
+                    fragment.appendChild(badgeEl);
+                });
+            });
+
+            badgeList.appendChild(fragment);
+            badgeCount.textContent = badges.length;
+        }
+
+        // Update badge display based on filters
+        function updateBadgeDisplay() {
+            const searchQuery = badgeSearch.value.toLowerCase();
+            const selectedCategory = categorySelect.value;
+
+            let filteredBadges = allBadges;
+
+            // Filter by category
+            if (selectedCategory !== 'all') {
+                filteredBadges = filteredBadges.filter(badge => badge.category === selectedCategory);
+            }
+
+            // Filter by search
+            if (searchQuery) {
+                filteredBadges = filteredBadges.filter(badge => 
+                    badge.name.toLowerCase().includes(searchQuery) ||
+                    (badge.technology && badge.technology.toLowerCase().includes(searchQuery)) ||
+                    (badge.categoryName && badge.categoryName.toLowerCase().includes(searchQuery)) ||
+                    (badge.alt_text && badge.alt_text.toLowerCase().includes(searchQuery))
+                );
+            }
+
+            displayBadges(filteredBadges);
+        }
+
+        // Handle drop in editor
+        function handleDrop(e) {
+            e.preventDefault();
+            const markdownToInsert = e.dataTransfer.getData('text/plain');
+            
+            if (!markdownToInsert) return;
+
+            const start = editor.selectionStart;
+            const end = editor.selectionEnd;
+            const text = editor.value;
+
+            // Insert the text at cursor position
+            editor.value = text.substring(0, start) + markdownToInsert + text.substring(end);
+            
+            // Move cursor to after inserted text
+            editor.selectionStart = editor.selectionEnd = start + markdownToInsert.length;
+            editor.focus();
+            
+            // Update preview
+            updatePreview();
+        }
+
+        // Toggle sidebar
+        function toggleSidebar() {
+            sidebar.classList.toggle('hidden');
+            toggleBtn.classList.toggle('active');
+        }
+
+        // Initialize the application
+        async function init() {
+            // Populate category dropdown
+            categorySelect.innerHTML = '<option value="all">All Categories</option>';
+            
+            // Load data first, then populate dropdown
+            await loadBadgeData();
+            
+            categories.forEach(category => {
+                if (category.count > 0) {
+                    const option = document.createElement('option');
+                    option.value = category.key;
+                    option.textContent = `${category.name} (${category.count})`;
+                    categorySelect.appendChild(option);
+                }
+            });
+
+            // Setup event listeners
+            categorySelect.addEventListener('change', updateBadgeDisplay);
+            badgeSearch.addEventListener('input', updateBadgeDisplay);
+            editor.addEventListener('input', updatePreview);
+            toggleBtn.addEventListener('click', toggleSidebar);
+
+            // Drag and drop
+            editor.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+            });
+            editor.addEventListener('drop', handleDrop);
+
+            // Initialize Lucide icons
+            lucide.createIcons();
+
+            // Handle responsive sidebar
+            if (window.innerWidth < 1024) {
+                toggleSidebar();
+            }
+
+            // Initial preview
+            updatePreview();
+        }
+
+        // Run initialization
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
